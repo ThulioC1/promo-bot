@@ -159,9 +159,10 @@ def run_bot_loop():
         print(f"Ciclo finalizado. Dormindo por {CHECK_INTERVAL} segundos...")
         time.sleep(CHECK_INTERVAL)
 
+# Inicia a thread diretamente no escopo global (para funcionar perfeitamente com o Gunicorn no Render)
+bot_thread = threading.Thread(target=run_bot_loop, daemon=True)
+bot_thread.start()
+
 if __name__ == "__main__":
-    bot_thread = threading.Thread(target=run_bot_loop, daemon=True)
-    bot_thread.start()
-    
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
