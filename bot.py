@@ -51,13 +51,18 @@ def fetch_mercado_libre_products():
     all_products = []
     terms = [t.strip() for t in SEARCH_TERMS.split(",")] if SEARCH_TERMS else ["ofertas", "promocao", "smartphone", "tecnologia"]
     
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7"
+    }
+    
     print(f"[{time.strftime('%X')}] Buscando termos na API do ML: {terms}")
     for term in terms:
         if not term:
             continue
         url = f"https://api.mercadolibre.com/sites/MLB/search?q={term}&limit=5"
         try:
-            response = requests.get(url, timeout=10)
+            response = requests.get(url, headers=headers, timeout=10)
             if response.status_code == 200:
                 data = response.json()
                 items = data.get("results", [])
