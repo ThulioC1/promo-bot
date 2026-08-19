@@ -21,9 +21,9 @@ SEEN_FILE = "seen.json"
 
 app = Flask(__name__)
 
-@app.route("/")
-def home():
-    return "Bot do Mercado Livre rodando com sucesso! 🚀"
+# Controle de concorrência para iniciar a thread apenas uma vez
+_bot_thread_started = False
+_lock = threading.Lock()
 
 def load_seen():
     if os.path.exists(SEEN_FILE):
@@ -149,7 +149,6 @@ def process_and_send_offers():
 
 def run_bot_loop():
     print(">>> THREAD DO BOT INICIADA COM SUCESSO! <<<")
-    time.sleep(3) # Aguarda o Flask estabilizar
     while True:
         try:
             process_and_send_offers()
@@ -159,9 +158,18 @@ def run_bot_loop():
         print(f"Ciclo finalizado. Dormindo por {CHECK_INTERVAL} segundos...")
         time.sleep(CHECK_INTERVAL)
 
-# Inicia a thread diretamente no escopo global (para funcionar perfeitamente com o Gunicorn no Render)
-bot_thread = threading.Thread(target=run_bot_loop, daemon=True)
-bot_thread.start()
+def start_bot_background():
+    global _bot_thread_started
+    with _lock:
+        if not _bot_thread_started:
+            _bot_thread_started = True
+            bot_thread = threading.Thread(target=run_bot_loop, daemon=True)
+            bot_thread.start()
+
+@app.route("/")
+def home():
+    start_bot_background()
+    return "Bot do Mercado Livre rodando com sucesso! 🚀"
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
