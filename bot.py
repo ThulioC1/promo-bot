@@ -4,7 +4,6 @@ import json
 import threading
 import requests
 from dotenv import load_dotenv
-from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup
 from flask import Flask
 
 # Carrega variáveis de ambiente
@@ -22,7 +21,7 @@ FOOTER_TEXT = os.getenv("FOOTER", "🔗 Links afiliados: posso ganhar comissao s
 BLOCK_WORDS = [word.strip().lower() for word in os.getenv("BLOCK_WORDS", "usado,recondicionado").split(",") if word.strip()]
 SEEN_FILE = "seen.json"
 
-# Inicializa o Flask (necessário para o Render manter o app grátis acordado)
+# Inicializa o Flask para manter o app acordado no Render
 app = Flask(__name__)
 
 @app.route("/")
@@ -53,7 +52,7 @@ def generate_affiliate_link(original_url):
 
 def fetch_mercado_libre_products():
     all_products = []
-    terms = [t.strip() for t in SEARCH_TERMS.split(",")] if SEARCH_TERMS else ["ofertas", "promocao", "smartphone"]
+    terms = [t.strip() for t in SEARCH_TERMS.split(",")] if SEARCH_TERMS else ["ofertas", "promocao", "smartphone", "tecnologia"]
     
     for term in terms:
         if not term:
@@ -66,17 +65,36 @@ def fetch_mercado_libre_products():
                 items = data.get("results", [])
                 for item in items:
                     all_products.append(item)
+            else:
+                print(f"Erro ao buscar termo '{term}': Status {response.status_code}")
         except Exception as e:
             print(f"Erro de conexão ao buscar '{term}': {e}")
             
     return all_products
 
+def send_telegram_photo(photo_url, caption, reply_markup):
+    """Envia foto com legenda e botão usando diretamente a API HTTP do Telegram."""
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendPhoto"
+    payload = {
+        "chat_id": TELEGRAM_CHAT_ID,
+        "photo": photo_url,
+        "caption": caption,
+        "parse_mode": "Markdown",
+        "reply_markup": json.dumps(reply_markup)
+    }
+    try:
+        response = requests.post(url, json=payload, timeout=10)
+        return response.json()
+    except Exception as e:
+        print(f"Erro ao enviar requisição para o Telegram: {e}")
+        return {"ok": False}
+
 def process_and_send_offers():
-    bot = Bot(token=TELEGRAM_TOKEN)
     seen_products = load_seen()
     
     print("Buscando novos produtos na API do Mercado Livre...")
     products = fetch_mercado_libre_products()
+    print(f"Total de produtos encontrados na busca: {len(products)}")
     
     for item in products:
         item_id = item.get("id")
@@ -103,50 +121,56 @@ def process_and_send_offers():
         seen_products.append(item_id)
         save_seen(seen_products)
         
+        # Monta a mensagem formatada
         message = (
-            f"🔥 **OFERTA DO MERCADO LIVRE**\n\n"
-            f"📦 **{title}**\n\n"
-            f"💰 Por apenas **R$ {price:.2f}**\n"
+            f"🔥 *OFERTA DO MERCADO LIVRE*\n\n"
+            f"📦 *{title}*\n\n"
+            f"💰 Por apenas *R$ {price:.2f}*\n"
         )
         
         if original_price and original_price > price:
             message += f"📉 De R$ {original_price:.2f}\n"
-            message += f"🏷️ **{discount}% OFF**\n\n"
+            message += f"🏷️ *{discount}% OFF*\n\n"
         else:
             message += "\n"
             
         message += f"🏪 Mercado Livre\n\n_{FOOTER_TEXT}_"
         
         affiliate_link = generate_affiliate_link(permalink)
-        keyboard = [[InlineKeyboardButton("🛒 VER OFERTA", url=affiliate_link)]]
-        reply_markup = InlineKeyboardMarkup(keyboard)
         
-        try:
-            if thumbnail:
-                bot.send_photo(chat_id=TELEGRAM_CHAT_ID, photo=thumbnail, caption=message, parse_mode="Markdown", reply_markup=reply_markup)
-            else:
-                bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=message, parse_mode="Markdown", reply_markup=reply_markup)
-            print(f"Oferta enviada: {title}")
-            time.sleep(2)
-        except Exception as e:
-            print(f"Erro ao enviar para o Telegram: {e}")
+        # Estrutura do botão inline do Telegram
+        reply_markup = {
+            "inline_keyboard": [
+                [{"text": "🛒 VER OFERTA", "url": affiliate_link}]
+            ]
+        }
+        
+        result = send_telegram_photo(thumbnail, message, reply_markup)
+        if result.get("ok"):
+            print(f"Oferta enviada com sucesso: {title}")
+        else:
+            print(f"Falha ao enviar oferta '{title}': {result}")
+            
+        time.sleep(2)
 
 def run_bot_loop():
-    """Loop contínuo do bot rodando em segundo plano."""
     print("Loop do bot iniciado em background!")
+    # Pequena pausa inicial para garantir que o servidor web subiu primeiro
+    time.sleep(5)
     while True:
         try:
             process_and_send_offers()
         except Exception as e:
-            print(f"Erro no ciclo principal: {e}")
+            print(f"Erro no ciclo principal do bot: {e}")
         
+        print(f"Aguardando {CHECK_INTERVAL} segundos para a próxima varredura...")
         time.sleep(CHECK_INTERVAL)
 
 if __name__ == "__main__":
-    # Inicia o loop do bot em uma thread separada para não bloquear o servidor web
+    # Inicia o loop do bot em uma thread separada
     bot_thread = threading.Thread(target=run_bot_loop, daemon=True)
     bot_thread.start()
     
-    # Roda o Flask na porta exigida pelo Render (porta padrão 5000 ou via variável PORT)
+    # Roda o Flask na porta exigida pelo Render
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
