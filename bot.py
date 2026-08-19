@@ -51,10 +51,16 @@ def fetch_mercado_libre_products():
     all_products = []
     terms = [t.strip() for t in SEARCH_TERMS.split(",")] if SEARCH_TERMS else ["ofertas", "promocao", "smartphone", "tecnologia"]
     
+    # Token gerado no painel de desenvolvedores do Mercado Livre
+    ml_token = os.getenv("ML_ACCESS_TOKEN", "")
+    
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7"
     }
+    
+    if ml_token:
+        headers["Authorization"] = f"Bearer {ml_token}"
     
     print(f"[{time.strftime('%X')}] Buscando termos na API do ML: {terms}")
     for term in terms:
@@ -70,7 +76,7 @@ def fetch_mercado_libre_products():
                 for item in items:
                     all_products.append(item)
             else:
-                print(f"Erro ao buscar termo '{term}': Status {response.status_code}")
+                print(f"Erro ao buscar termo '{term}': Status {response.status_code} - Resposta: {response.text[:200]}")
         except Exception as e:
             print(f"Erro de conexão ao buscar '{term}': {e}")
             
