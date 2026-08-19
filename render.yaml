@@ -1,0 +1,21 @@
+services:
+  - type: worker
+    name: promo-bot
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python bot.py
+    envVars:
+      - key: TELEGRAM_TOKEN
+        sync: false
+      - key: TELEGRAM_CHAT_ID
+        sync: false
+      - key: SOURCE
+        value: rss
+      - key: FEED_URL
+        sync: false
+      - key: AMAZON_TAG
+        sync: false
+      - key: ML_AFFILIATE
+        sync: false
+      - key: FOOTER
+        sync: false
