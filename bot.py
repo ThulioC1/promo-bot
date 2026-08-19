@@ -47,20 +47,42 @@ def generate_affiliate_link(original_url):
     affiliate_suffix = f"/{ML_AFFILIATE}" if not ML_AFFILIATE.startswith("/") else ML_AFFILIATE
     return f"{clean_url}?matt_tool={affiliate_suffix.replace('social/', '')}"
 
+def get_ml_token():
+    client_id = os.getenv("ML_CLIENT_ID")
+    client_secret = os.getenv("ML_CLIENT_SECRET")
+    
+    if not client_id or not client_secret:
+        return None
+        
+    url = "https://api.mercadolibre.com/oauth/token"
+    payload = {
+        "grant_type": "client_credentials",
+        "client_id": client_id,
+        "client_secret": client_secret
+    }
+    
+    try:
+        response = requests.post(url, data=payload, timeout=10)
+        if response.status_code == 200:
+            return response.json().get("access_token")
+        else:
+            print(f"Erro ao obter token do ML: Status {response.status_code} - {response.text}")
+    except Exception as e:
+        print(f"Erro de conexão ao obter token: {e}")
+        
+    return None
+
 def fetch_mercado_libre_products():
     all_products = []
     terms = [t.strip() for t in SEARCH_TERMS.split(",")] if SEARCH_TERMS else ["ofertas", "promocao", "smartphone", "tecnologia"]
     
-    # Token gerado no painel de desenvolvedores do Mercado Livre
-    ml_token = os.getenv("ML_ACCESS_TOKEN", "")
-    
+    token = get_ml_token()
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7"
     }
     
-    if ml_token:
-        headers["Authorization"] = f"Bearer {ml_token}"
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
     
     print(f"[{time.strftime('%X')}] Buscando termos na API do ML: {terms}")
     for term in terms:
