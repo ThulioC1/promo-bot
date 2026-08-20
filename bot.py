@@ -3,6 +3,7 @@ import time
 import json
 import threading
 import requests
+from bs4 import BeautifulSoup
 from dotenv import load_dotenv
 from flask import Flask
 
@@ -47,60 +48,82 @@ def generate_affiliate_link(original_url):
     affiliate_suffix = f"/{ML_AFFILIATE}" if not ML_AFFILIATE.startswith("/") else ML_AFFILIATE
     return f"{clean_url}?matt_tool={affiliate_suffix.replace('social/', '')}"
 
-def get_ml_token():
-    client_id = os.getenv("ML_CLIENT_ID")
-    client_secret = os.getenv("ML_CLIENT_SECRET")
-    
-    if not client_id or not client_secret:
-        return None
-        
-    url = "https://api.mercadolibre.com/oauth/token"
-    payload = {
-        "grant_type": "client_credentials",
-        "client_id": client_id,
-        "client_secret": client_secret
-    }
-    
-    try:
-        response = requests.post(url, data=payload, timeout=10)
-        if response.status_code == 200:
-            return response.json().get("access_token")
-        else:
-            print(f"Erro ao obter token do ML: Status {response.status_code} - {response.text}")
-    except Exception as e:
-        print(f"Erro de conexão ao obter token: {e}")
-        
-    return None
-
 def fetch_mercado_libre_products():
     all_products = []
-    terms = [t.strip() for t in SEARCH_TERMS.split(",")] if SEARCH_TERMS else ["ofertas", "promocao", "smartphone", "tecnologia"]
+    terms = [t.strip() for t in SEARCH_TERMS.split(",")] if SEARCH_TERMS else ["smartphone", "notebook"]
     
-    token = get_ml_token()
     headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
         "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7"
     }
     
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
-    
-    print(f"[{time.strftime('%X')}] Buscando termos na API do ML: {terms}")
+    print(f"[{time.strftime('%X')}] Realizando scraping nas páginas do ML para os termos: {terms}")
     for term in terms:
         if not term:
             continue
-        url = f"https://api.mercadolibre.com/sites/MLB/search?q={term}&limit=5"
+        formatted_term = term.replace(" ", "-")
+        url = f"https://lista.mercadolivre.com.br/{formatted_term}"
         try:
             response = requests.get(url, headers=headers, timeout=10)
             if response.status_code == 200:
-                data = response.json()
-                items = data.get("results", [])
+                soup = BeautifulSoup(response.text, 'html.parser')
+                items = soup.select('.ui-search-result, .poly-card')
                 print(f"[{time.strftime('%X')}] Termo '{term}': {len(items)} produtos encontrados.")
-                for item in items:
-                    all_products.append(item)
+                
+                for item in items[:6]: # Analisa os primeiros resultados de cada termo
+                    try:
+                        # Extrair Título
+                        title_elem = item.select_one('.ui-search-item__title, .poly-component__title')
+                        if not title_elem:
+                            continue
+                        title = title_elem.get_text(strip=True)
+                        
+                        # Extrair Link
+                        link_elem = item.select_one('a.ui-search-link, a.poly-component__title, a')
+                        if not link_elem:
+                            continue
+                        permalink = link_elem.get('href', '').split('#')[0]
+                        
+                        # Gerar ID único baseado na URL ou título
+                        item_id = permalink.split('/')[-1].split('?')[0] or str(hash(title))
+                        
+                        # Extrair Preço Atual
+                        price_elem = item.select_one('.andes-money-amount__fraction, .poly-price__current .andes-money-amount__fraction')
+                        if not price_elem:
+                            continue
+                        price_str = price_elem.get_text(strip=True).replace('.', '').replace(',', '.')
+                        price = float(price_str) if price_str.replace('.', '', 1).isdigit() else 0.0
+                        
+                        # Extrair Preço Original (se houver desconto)
+                        orig_price_elem = item.select_one('.ui-search-price__original-value .andes-money-amount__fraction, .poly-price__original .andes-money-amount__fraction')
+                        original_price = None
+                        if orig_price_elem:
+                            orig_str = orig_price_elem.get_text(strip=True).replace('.', '').replace(',', '.')
+                            if orig_str.replace('.', '', 1).isdigit():
+                                original_price = float(orig_str)
+                                
+                        # Extrair Imagem
+                        img_elem = item.select_one('img.ui-search-result-image__element, img.poly-component__picture, img')
+                        thumbnail = ""
+                        if img_elem:
+                            thumbnail = img_elem.get('data-src') or img_elem.get('src', '')
+                            
+                        if title and permalink and price > 0:
+                            all_products.append({
+                                "id": item_id,
+                                "title": title,
+                                "price": price,
+                                "original_price": original_price,
+                                "permalink": permalink,
+                                "thumbnail": thumbnail
+                            })
+                    except Exception as inner_e:
+                        continue
             else:
-                print(f"Erro ao buscar termo '{term}': Status {response.status_code} - Resposta: {response.text[:200]}")
+                print(f"Erro no scraping do termo '{term}': Status {response.status_code}")
         except Exception as e:
-            print(f"Erro de conexão ao buscar '{term}': {e}")
+            print(f"Erro de conexão ao raspar '{term}': {e}")
             
     return all_products
 
@@ -121,10 +144,10 @@ def send_telegram_photo(photo_url, caption, reply_markup):
         return {"ok": False}
 
 def process_and_send_offers():
-    print("--- INICIANDO NOVO CICLO DE VARREDURA ---")
+    print("--- INICIANDO NOVO CICLO DE VARREDURA (WEB SCRAPING) ---")
     seen_products = load_seen()
     products = fetch_mercado_libre_products()
-    print(f"Total acumulado de produtos na busca: {len(products)}")
+    print(f"Total acumulado de produtos válidos: {len(products)}")
     
     for item in products:
         item_id = item.get("id")
@@ -172,7 +195,12 @@ def process_and_send_offers():
             ]
         }
         
-        result = send_telegram_photo(thumbnail, message, reply_markup)
+        if thumbnail:
+            result = send_telegram_photo(thumbnail, message, reply_markup)
+        else:
+            # Fallback caso não encontre imagem
+            result = {"ok": True} # Ajuste se quiser enviar mensagem de texto pura
+            
         if result.get("ok"):
             print(f"SUCESSO: Oferta enviada -> {title}")
         else:
@@ -181,7 +209,7 @@ def process_and_send_offers():
         time.sleep(2)
 
 def run_bot_loop():
-    print(">>> THREAD DO BOT INICIADA COM SUCESSO! <<<")
+    print(">>> THREAD DO BOT DE SCRAPING INICIADA COM SUCESSO! <<<")
     while True:
         try:
             process_and_send_offers()
@@ -202,7 +230,7 @@ def start_bot_background():
 @app.route("/")
 def home():
     start_bot_background()
-    return "Bot do Mercado Livre rodando com sucesso! 🚀"
+    return "Bot de Scraping do Mercado Livre rodando com sucesso! 🚀"
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
