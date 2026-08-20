@@ -49,73 +49,7 @@ def generate_affiliate_link(original_url):
     affiliate_suffix = f"/{ML_AFFILIATE}" if not ML_AFFILIATE.startswith("/") else ML_AFFILIATE
     return f"{clean_url}?matt_tool={affiliate_suffix.replace('social/', '')}"
 
-def fetch_mercado_libre_products():
-    all_products = []
-    terms = [t.strip() for t in SEARCH_TERMS.split(",")] if SEARCH_TERMS else ["smartphone", "notebook"]
-    
-    print(f"[{time.strftime('%X')}] Realizando scraping avançado no ML para os termos: {terms}")
-    for term in terms:
-        if not term:
-            continue
-        formatted_term = term.replace(" ", "-")
-        url = f"https://lista.mercadolivre.com.br/{formatted_term}"
-        try:
-            # impersonate="chrome" força o TLS fingerprint de um navegador real, burlando o Cloudflare do Render
-            response = curl_requests.get(url, impersonate="chrome", timeout=15)
-            if response.status_code == 200:
-                soup = BeautifulSoup(response.text, 'html.parser')
-                items = soup.select('.ui-search-result, .poly-card, .ui-search-layout__item')
-                print(f"[{time.strftime('%X')}] Termo '{term}': {len(items)} produtos encontrados.")
-                
-                for item in items[:6]:
-                    try:
-                        title_elem = item.select_one('.ui-search-item__title, .poly-component__title')
-                        if not title_elem:
-                            continue
-                        title = title_elem.get_text(strip=True)
-                        
-                        link_elem = item.select_one('a.ui-search-link, a.poly-component__title, a')
-                        if not link_elem:
-                            continue
-                        permalink = link_elem.get('href', '').split('#')[0]
-                        
-                        item_id = permalink.split('/')[-1].split('?')[0] or str(hash(title))
-                        
-                        price_elem = item.select_one('.andes-money-amount__fraction, .poly-price__current .andes-money-amount__fraction')
-                        if not price_elem:
-                            continue
-                        price_str = price_elem.get_text(strip=True).replace('.', '').replace(',', '.')
-                        price = float(price_str) if price_str.replace('.', '', 1).isdigit() else 0.0
-                        
-                        orig_price_elem = item.select_one('.ui-search-price__original-value .andes-money-amount__fraction, .poly-price__original .andes-money-amount__fraction')
-                        original_price = None
-                        if orig_price_elem:
-                            orig_str = orig_price_elem.get_text(strip=True).replace('.', '').replace(',', '.')
-                            if orig_str.replace('.', '', 1).isdigit():
-                                original_price = float(orig_str)
-                                
-                        img_elem = item.select_one('img.ui-search-result-image__element, img.poly-component__picture, img')
-                        thumbnail = ""
-                        if img_elem:
-                            thumbnail = img_elem.get('data-src') or img_elem.get('src', '')
-                            
-                        if title and permalink and price > 0:
-                            all_products.append({
-                                "id": item_id,
-                                "title": title,
-                                "price": price,
-                                "original_price": original_price,
-                                "permalink": permalink,
-                                "thumbnail": thumbnail
-                            })
-                    except Exception:
-                        continue
-            else:
-                print(f"Erro no scraping do termo '{term}': Status {response.status_code}")
-        except Exception as e:
-            print(f"Erro de conexão ao raspar '{term}': {e}")
-            
-    return all_products
+
 
 def send_telegram_photo(photo_url, caption, reply_markup):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendPhoto"
